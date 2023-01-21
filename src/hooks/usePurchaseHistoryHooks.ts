@@ -22,6 +22,7 @@ export const usePurchaseHistoryHooks = ():PurchaseHistoryHooks =>{
     const [sumPurchaseHistoriesAmount, setSumPurchaseHistoriesAmount] = useState<number>(0);
 
     const calcPurchaseHistoriesAmount = () => {
+        setSumPurchaseHistoriesAmount(0)
         purchaseHistories.map((history:PurchaseHistory) =>{
             const {pay_total_amount, total_target_flag} = history
             if(total_target_flag){
