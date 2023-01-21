@@ -1,0 +1,202 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+Parameters:
+  CordStarArn:
+    Type: String
+  FullRepositoryId:
+    Type: String
+
+Resources:
+  # DeployS3Bucket:
+  DeployS3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: rakutencard-calculator-deploy-bucket
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+  # ArtifactS3Bucket
+  ArtifactBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: rakutencard-calculator-artifact-bucket
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+
+  # CodeBuildに適用するIAMRole
+  CodeBuildServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Resource: "*"
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  # - dynamodb:*
+                  # - ses:*
+              - Resource: !Sub arn:aws:s3:::${ArtifactBucket}/*
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:GetObjectVersion
+
+  # CodePipelineに適用するIAMRole
+  CodePipelineServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: codepipeline.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: root
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Resource: 
+                  - !Sub arn:aws:s3:::${ArtifactBucket}/*
+                  - !Sub arn:aws:s3:::${DeployS3Bucket}/*
+                Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:GetBucketVersioning
+              - Resource: "*"
+                Effect: Allow
+                Action:
+                  - codebuild:StartBuild
+                  - codebuild:StopBuild
+                  - codebuild:BatchGet*
+                  - codebuild:Get*
+                  - codebuild:List*
+                  - codedeploy:CreateDeployment
+                  - codedeploy:GetApplicationRevision
+                  - codedeploy:GetDeployment
+                  - codedeploy:GetDeploymentConfig
+                  - codedeploy:RegisterApplicationRevision
+                  - s3:GetBucketLocation
+                  - s3:ListAllMyBuckets
+                  - iam:PassRole
+              - Resource: "arn:aws:ssm:*:*:parameter/CodeBuild/*"
+                Effect: Allow
+                Action:
+                  - ssm:PutParameter
+              - Resource: !Ref CordStarArn
+                Effect: "Allow"
+                Action: 
+                  - "codestar-connections:UseConnection"
+  # CodeBuild
+  CodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Artifacts:
+        Type: CODEPIPELINE
+      Source:
+        Type: CODEPIPELINE
+      Environment:
+        ComputeType: BUILD_GENERAL1_SMALL
+        Image: aws/codebuild/standard:5.0
+        Type: LINUX_CONTAINER
+      Name: !Sub ${AWS::StackName}BuildProject
+      ServiceRole: !Ref CodeBuildServiceRole
+  # CodePipeLine     
+  CodePipeline:
+    Type: "AWS::CodePipeline::Pipeline"
+    DependsOn:
+     - DeployS3Bucket
+     - ArtifactBucket
+    Properties:
+      Name: !Sub ${AWS::StackName}Pipeline
+      RoleArn: !GetAtt CodePipelineServiceRole.Arn
+      ArtifactStore:
+        Location: !Ref ArtifactBucket
+        Type: S3
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: Source
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Version: "1"
+                Provider: CodeStarSourceConnection
+              OutputArtifacts:
+                - Name: SourceArtifact
+              Configuration:
+                FullRepositoryId: !Ref FullRepositoryId
+                ConnectionArn: !Ref CordStarArn
+                BranchName: "master"
+                DetectChanges: "true"
+                OutputArtifactFormat: "CODE_ZIP"
+              Region: ap-northeast-1
+              RunOrder: 1
+        - Name: Build
+          Actions:
+            - Name: Build
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Version: 1
+                Provider: CodeBuild
+              Configuration:
+                ProjectName: !Ref CodeBuildProject
+              Region: ap-northeast-1
+              RunOrder: 1
+              InputArtifacts:
+                - Name: SourceArtifact
+              OutputArtifacts:
+                - Name: BuildArtifact
+        - Name: Deploy
+          Actions:
+            - Name: Deploy
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Version: 1
+                Provider: S3
+              Configuration:
+                BucketName: !Ref DeployS3Bucket
+                Extract: true
+              RunOrder: 1
+              InputArtifacts:
+                - Name: BuildArtifact
+Outputs:
+  DeployS3Bucket:
+    Value: !Ref DeployS3Bucket
+    Export:
+      Name: !Sub "${AWS::StackName}-DeployS3Bucket"
+  DeployS3BucketArn:
+    Value: !GetAtt DeployS3Bucket.Arn
+    Export:
+      Name: !Sub "${AWS::StackName}-DeployS3BucketArn"
+  DeployS3BucketDomainName:
+    Value: !GetAtt DeployS3Bucket.DomainName
+    Export:
+      Name: !Sub "${AWS::StackName}-DeployS3BucketDomainName"
+              
+          

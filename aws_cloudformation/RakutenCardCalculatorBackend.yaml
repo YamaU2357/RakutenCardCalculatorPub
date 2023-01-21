@@ -1,0 +1,294 @@
+---
+AWSTemplateFormatVersion: '2010-09-09'
+
+Parameters:
+  MonthlyRakutenCardStackName:
+    Type: String
+    Default: monthly-rakuten-card
+  MonthlyPaymentAppFnArn:
+    Type: String
+  CognitoSystemId:
+    Type: String
+  UserPoolEmail:
+    Type: String
+    Description: This email is used by Cognito UserPool 
+Resources:
+  LambdaServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+        Version: '2012-10-17'
+      ManagedPolicyArns:
+        - "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+  HttpApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: MonthlyPaymentAPI
+      ProtocolType: HTTP
+      CorsConfiguration:
+        AllowCredentials: false
+        AllowHeaders: 
+          - Authorization
+          - Content-Type
+        AllowMethods:
+          - GET
+          - POST
+          - PUT
+          - DELETE
+          - HEAD
+          - OPTIONS
+        AllowOrigins:
+          - !Sub 
+            - 'https://${Domain}'
+            - Domain:
+                Fn::ImportValue:
+                  !Sub '${MonthlyRakutenCardStackName}-AliaseDomainName'
+        MaxAge: 600
+  HttpApiDefaultStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref HttpApi
+      StageName: "$default"
+      AutoDeploy: true
+      AccessLogSettings:
+        DestinationArn: !GetAtt APILog.Arn
+        Format: $context.identity.sourceIp - - [$context.requestTime] "$context.httpMethod $context.routeKey $context.protocol" $context.status $context.responseLength $context.requestId
+  HttpApiMonthlyPaymentIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref HttpApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub ${MonthlyPaymentAppFnArn}
+      PayloadFormatVersion: '2.0'
+  HttpApiMonthlyPaymentIntegrationPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Sub ${MonthlyPaymentAppFnArn} 
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${HttpApi}/*/*/*"
+  # BasicAmount Routes
+  HttpApiFetchBasicAmountRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: GET /MonthlyPayment/basic_amount/{year}/{month}
+      AuthorizationType: JWT
+      AuthorizerId: !GetAtt JWTAuthorizer.AuthorizerId
+      Target: !Sub "integrations/${HttpApiMonthlyPaymentIntegration}"
+  HttpApiUpdateBasicAmountRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: POST /MonthlyPayment/basic_amount
+      AuthorizationType: JWT
+      AuthorizerId: !GetAtt JWTAuthorizer.AuthorizerId
+      Target: !Sub "integrations/${HttpApiMonthlyPaymentIntegration}"
+  HttpApiAddBasicAmountRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: PUT /MonthlyPayment/basic_amount/{year}/{month}
+      AuthorizationType: JWT
+      AuthorizerId: !GetAtt JWTAuthorizer.AuthorizerId
+      Target: !Sub "integrations/${HttpApiMonthlyPaymentIntegration}"
+  # PurchaseHitory Routes
+  HttpApiAddPurchaseHistoryRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: POST /MonthlyPayment/purchaseHistory/{year}/{month}
+      AuthorizationType: JWT
+      AuthorizerId: !GetAtt JWTAuthorizer.AuthorizerId
+      Target: !Sub "integrations/${HttpApiMonthlyPaymentIntegration}"  
+  HttpApiUpdatePurchaseHistoryRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: PUT /MonthlyPayment/purchaseHistory/{ID}
+      AuthorizationType: JWT
+      AuthorizerId: !GetAtt JWTAuthorizer.AuthorizerId
+      Target: !Sub "integrations/${HttpApiMonthlyPaymentIntegration}" 
+  HttpApiDeletePurchaseHistoryRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: DELETE /MonthlyPayment/purchaseHistory/{ID}
+      AuthorizationType: JWT
+      AuthorizerId: !GetAtt JWTAuthorizer.AuthorizerId
+      Target: !Sub "integrations/${HttpApiMonthlyPaymentIntegration}" 
+  # PurchaseHitories Routes    
+  HttpApiAddPurchaseHistoriesRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: POST /MonthlyPayment/purchaseHistories/{year}/{month}
+      AuthorizationType: JWT
+      AuthorizerId: !GetAtt JWTAuthorizer.AuthorizerId
+      Target: !Sub "integrations/${HttpApiMonthlyPaymentIntegration}"       
+  HttpApiFetchPurchaseHistoriesRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref HttpApi
+      RouteKey: GET /MonthlyPayment/purchaseHistories/{year}/{month}
+      AuthorizationType: JWT
+      AuthorizerId: !GetAtt JWTAuthorizer.AuthorizerId
+      Target: !Sub "integrations/${HttpApiMonthlyPaymentIntegration}"
+  APILog:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: MonthlyPaymentAPILogs
+      RetentionInDays: 1
+
+  # API Gateway v2 Authorizer
+  JWTAuthorizer:
+    Type: AWS::ApiGatewayV2::Authorizer
+    Properties:
+      ApiId: !Ref HttpApi
+      AuthorizerType: JWT
+      IdentitySource:
+        - "$request.header.Authorization"
+      JwtConfiguration:
+        Audience:
+          - !Ref UserPoolClient
+        Issuer: !Sub https://cognito-idp.${AWS::Region}.amazonaws.com/${UserPool}
+      Name: rakutencard-calculater-cognito-jwt-authorizer
+
+  MonthlyPaymentAppDDBTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: MonthlyPaymentAppDDBTable
+      AttributeDefinitions:
+        - 
+          AttributeName: "ID"
+          AttributeType: "S"
+        - 
+          AttributeName: "DataType"
+          AttributeType: "S"
+        - 
+          AttributeName: "PurchaseHistoryDataValue"
+          AttributeType: "S"
+        - 
+          AttributeName: "FixedCostDataValue"
+          AttributeType: "S"
+      KeySchema: 
+        - 
+          AttributeName: "ID"
+          KeyType: "HASH"
+        - 
+          AttributeName: "DataType"
+          KeyType: "RANGE"
+      BillingMode: "PAY_PER_REQUEST"
+      GlobalSecondaryIndexes: 
+        - 
+          IndexName: "purchaseHistoryGSI"
+          KeySchema: 
+            - 
+              AttributeName: "PurchaseHistoryDataValue"
+              KeyType: "HASH"
+            - 
+              AttributeName: "ID"
+              KeyType: "RANGE"
+          Projection:
+            NonKeyAttributes: 
+              - "DataType"
+              - "UserName"
+            ProjectionType: INCLUDE
+        - 
+          IndexName: "fixedCostDataValueGSI"
+          KeySchema: 
+            - 
+              AttributeName: "FixedCostDataValue"
+              KeyType: "HASH"
+            - 
+              AttributeName: "ID"
+              KeyType: "RANGE"
+          Projection:
+            NonKeyAttributes: 
+              - "DataType"
+              - "UserName"
+            ProjectionType: INCLUDE
+  
+  ###Cognito
+  # Create UserPool
+  UserPool:
+    Type: "AWS::Cognito::UserPool"
+    Properties:
+      AliasAttributes: 
+        - email
+      Policies:
+        PasswordPolicy: #Setting PasswordPolicy
+          MinimumLength: 8 
+          RequireUppercase: true
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: true
+          TemporaryPasswordValidityDays: 7
+      MfaConfiguration: 'OFF'
+      AccountRecoverySetting: 
+        RecoveryMechanisms: 
+          - Name: verified_email
+            Priority: 1
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: false
+        # UnusedAccountValidityDays: 7
+      AutoVerifiedAttributes:
+        - email
+      EmailConfiguration:
+        EmailSendingAccount: DEVELOPER
+        SourceArn: !Sub arn:aws:ses:ap-northeast-1:${AWS::AccountId}:identity/${UserPoolEmail}
+      UserPoolName: !Sub ${CognitoSystemId}-UserPool
+
+
+  # Create UserPoolClient
+  UserPoolClient:
+    Type: "AWS::Cognito::UserPoolClient"
+    Properties:
+      UserPoolId:
+        Ref: UserPool
+      AllowedOAuthFlowsUserPoolClient: false
+      CallbackURLs: 
+        - !Sub 
+          - 'https://${Domain}'
+          - Domain:
+              Fn::ImportValue:
+                !Sub '${MonthlyRakutenCardStackName}-AliaseDomainName'
+      DefaultRedirectURI: !Sub 
+          - 'https://${Domain}'
+          - Domain:
+              Fn::ImportValue:
+                !Sub '${MonthlyRakutenCardStackName}-AliaseDomainName'
+      ClientName: !Sub ${CognitoSystemId}-UserPoolClient
+      SupportedIdentityProviders: 
+       - COGNITO
+      ExplicitAuthFlows:
+        - ALLOW_USER_SRP_AUTH
+        - ALLOW_REFRESH_TOKEN_AUTH
+      AuthSessionValidity: 3 #h
+      RefreshTokenValidity: 30 #day
+      AccessTokenValidity: 1 #h
+      IdTokenValidity: 1 #h
+      EnableTokenRevocation: true
+      PreventUserExistenceErrors: ENABLED
+    DependsOn: 
+     - UserPoolResourceServer
+
+  UserPoolResourceServer:
+    Type: AWS::Cognito::UserPoolResourceServer
+    Properties: 
+      Identifier: rakutencard-calculator
+      Name: RakutenCardCalculatorResourceServer   
+      UserPoolId:
+        Ref: UserPool
+
+  UserPoolDomain:
+    Type: AWS::Cognito::UserPoolDomain
+    Properties:
+      Domain: rakutencard-calculator
+      UserPoolId: 
+        Ref: UserPool
