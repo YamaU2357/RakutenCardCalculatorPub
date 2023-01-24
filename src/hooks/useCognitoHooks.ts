@@ -16,6 +16,7 @@ type CognitoHooks = {
   login: (props:loginProps) => void;
   changePassword: (props:changePasswordProps) => void
   logout: () => void;
+  getIdToken: () => Promise<string | undefined>;
   checkIsLogin: () => void;
   isLogin: Boolean;
   isFirstLogin: Boolean;
@@ -27,6 +28,7 @@ export const useCognitoHooks = ():CognitoHooks => {
     const [ isFirstLogin, setIsFirstLogin ] = useState<Boolean>(false)
     const [ userAttr, setUserAttr ] = useState<AmazonCognitoIdentity.CognitoUserAttribute>()
     const [ cognitoUser, setCognitoUser] = useState<AmazonCognitoIdentity.CognitoUser>()
+    const { jwtVerify } = awsJwtVerify();
 
     const login = (props:loginProps) => {
       const userPool = new CognitoUserPool(awsCognitoConfig);
@@ -95,10 +97,46 @@ export const useCognitoHooks = ():CognitoHooks => {
           setIsLogin(false)
       }
     }
+    const reLogin = () => {
+      const userPool = new CognitoUserPool(awsCognitoConfig);
+      const cognitoUser = userPool.getCurrentUser();
+      const username = localStorage.getItem(
+        localStrageConfig.username
+      )
+      const token = localStorage.getItem(`CognitoIdentityServiceProvider.${awsCognitoConfig.ClientId}.${username}.refreshToken`)!
+      const refreshToken = new AmazonCognitoIdentity.CognitoRefreshToken({RefreshToken: token});
+      if (cognitoUser && refreshToken) {
+
+          cognitoUser.refreshSession(refreshToken,(err, session:AmazonCognitoIdentity.CognitoUserSession)=>{
+            if(err){
+              console.log(err);
+              setIsLogin(false)
+            }else{
+              localStorage.setItem(
+                localStrageConfig.username,
+                session.getAccessToken().decodePayload().username
+              )
+              setIsLogin(true)
+            }
+          });
+
+      }
+    }
     const checkIsLogin = async () => {
-      const { jwtVerify } = awsJwtVerify();
       const { verifyResult } =  await jwtVerify()
       setIsLogin(verifyResult)
     }
-    return {login,logout,changePassword,checkIsLogin,isLogin,isFirstLogin,userName}
+    const getIdToken = async (): Promise<string | undefined> => {;
+      const { verifyResult,idToken } =  await jwtVerify()
+      if (verifyResult && idToken != null){
+        return idToken
+      }else{
+        reLogin()
+        const { verifyResult,idToken } =  await jwtVerify()
+        if (verifyResult && idToken != null){
+          return idToken
+        }
+      }
+    }
+    return {login,logout,getIdToken,changePassword,checkIsLogin,isLogin,isFirstLogin,userName}
 }
