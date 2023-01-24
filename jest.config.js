@@ -12,5 +12,7 @@ module.exports = {
   "moduleDirectories": ['node_modules', 'src'],
   "moduleNameMapper": {
     '#node-web-compat': "./node-web-compat-node.js",
-  }
+  },
+  "testEnvironment": "jest-environment-jsdom",
+  "setupFilesAfterEnv": ["<rootDir>/jest.setup.ts"]
 }

@@ -15,7 +15,7 @@ type BasicAmountHooks = {
     fetchBasicAmount: (props:fetchProps) => void,
     updateBasicAmount: (newBasicAmount:BasicAmount) => void,
 }
-export const useBasicAmountHooks = ():BasicAmountHooks =>{
+export const useBasicAmountHooks = (getIdToken: () => Promise<string | undefined>):BasicAmountHooks =>{
     const [basicAmount,setBasicAmount] =  useState<BasicAmount>({
         id : "",
         target_year_month : "",
@@ -28,10 +28,8 @@ export const useBasicAmountHooks = ():BasicAmountHooks =>{
     
     const fetchBasicAmount = async (props:fetchProps) => {
         const {year,month} = props
-        const { jwtVerify } = awsJwtVerify();
-        const {idToken,verifyResult} =  await jwtVerify()
-        
-        if (verifyResult && idToken != null){
+        const idToken = await getIdToken();
+        if (idToken != undefined){
             const headers = {
                 "Authorization": idToken
             }
@@ -53,19 +51,15 @@ export const useBasicAmountHooks = ():BasicAmountHooks =>{
             .catch((error: AxiosError) => {
                 axiosErrorOutput(error,"get basicAmount error")
             });
-        }else{
-            console.log("not logged in");
         }
     }
 
     const updateBasicAmount = async (newBasicAmount:BasicAmount) => {
-        const { jwtVerify } = awsJwtVerify();
-        const {idToken,verifyResult} =  await jwtVerify()
-        
         const {target_year_month} = newBasicAmount
         const year = target_year_month.split('/')[0]
         const month = target_year_month.split('/')[1]
-        if (verifyResult && idToken != null){
+        const idToken = await getIdToken();
+        if (idToken != undefined){
             const headers = {
                 "Authorization": idToken
             }
@@ -80,8 +74,6 @@ export const useBasicAmountHooks = ():BasicAmountHooks =>{
             }).catch((error: AxiosError) =>  {
                 axiosErrorOutput(error,"send basicAmount error")
             })
-        }else{
-            console.log("not logged in")
         }
     }
 
