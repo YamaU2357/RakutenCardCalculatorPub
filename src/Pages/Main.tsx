@@ -20,14 +20,14 @@ const StyledContainerDiv = styled.div`
 
 export const Main:FC = () =>{
   const {listYearMonth,setNextMonth,setLastMonth,setThisMonth} = useListYearMonth();
-  const {basicAmount, fetchBasicAmount, updateBasicAmount } = useBasicAmountHooks();
-  const {login,logout,changePassword,checkIsLogin,isLogin,isFirstLogin,userName} = useCognitoHooks();
+  const {login,logout,changePassword,checkIsLogin,getIdToken,isLogin,isFirstLogin,userName} = useCognitoHooks();
+  const {basicAmount, fetchBasicAmount, updateBasicAmount } = useBasicAmountHooks(getIdToken);
   const {
     purchaseHistories, isHistoryLoded, sumPurchaseHistoriesAmount,
     fetchPurchaseHistories, sendPurchaseHistories,
     updatePurchaseHistory, deletePurchaseHistory,
     calcPurchaseHistoriesAmount
-  } = usePurchaseHistoryHooks();
+  } = usePurchaseHistoryHooks(getIdToken);
 
   useEffect(() => {
     if(isLogin){

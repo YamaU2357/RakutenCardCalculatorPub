@@ -16,7 +16,7 @@ type PurchaseHistoryHooks = {
     deletePurchaseHistory:(deletedHistory:PurchaseHistory) => void;
     calcPurchaseHistoriesAmount:() => void;
 }
-export const usePurchaseHistoryHooks = ():PurchaseHistoryHooks =>{
+export const usePurchaseHistoryHooks = (getIdToken: () => Promise<string | undefined>):PurchaseHistoryHooks =>{
     const [purchaseHistories ,setPurchaseHistories]  = useState<PurchaseHistory[]>([]);
     const [isHistoryLoded, setIsHistoryLoded] = useState<Boolean>(false);
     const [sumPurchaseHistoriesAmount, setSumPurchaseHistoriesAmount] = useState<number>(0);
@@ -31,10 +31,8 @@ export const usePurchaseHistoryHooks = ():PurchaseHistoryHooks =>{
         })
     }
     const fetchPurchaseHistories = async (year:number,month:number) => {
-        const { jwtVerify } = awsJwtVerify();
-        const {idToken,verifyResult} =  await jwtVerify()
-
-        if (verifyResult && idToken != null){
+        const idToken = await getIdToken();
+        if (idToken != undefined){
             const headerData = {
                 "Authorization": idToken
             }
@@ -61,16 +59,12 @@ export const usePurchaseHistoryHooks = ():PurchaseHistoryHooks =>{
             .finally(()=> {
                 setIsHistoryLoded(false)
             })
-        }else{
-            console.log("not logged in");
         }
     }
 
     const sendPurchaseHistories = async (year:number,month:number,newPurchaseHistories:PurchaseHistory[]) => {
-        const { jwtVerify } = awsJwtVerify();
-        const {idToken,verifyResult} =  await jwtVerify()
-
-        if (verifyResult && idToken != null){
+        const idToken = await getIdToken();
+        if (idToken != undefined){
             const headers = {
                 "Authorization": idToken
             }
@@ -94,13 +88,20 @@ export const usePurchaseHistoryHooks = ():PurchaseHistoryHooks =>{
 
     const updatePurchaseHistory = async (newHistory:PurchaseHistory) => {
         const {id,use_store_product_name} = newHistory;
-        const { jwtVerify } = awsJwtVerify();
-        const {idToken,verifyResult} =  await jwtVerify()
-
-        if (verifyResult && idToken != null){
+        const idToken = await getIdToken();
+        if (idToken != undefined){
             const headers = {
                 "Authorization": idToken
             }
+            const oldPurchaseHistories = {...purchaseHistories}
+            const newPurchaseHistories = purchaseHistories.map(purchaseHistory =>{
+                if (purchaseHistory.id != newHistory.id){
+                  return purchaseHistory
+                }else{
+                  return newHistory
+                }
+            })
+            setPurchaseHistories(newPurchaseHistories)
             apiClient.put(
                 `/purchaseHistory/${id}`,
                 newHistory,
@@ -108,27 +109,16 @@ export const usePurchaseHistoryHooks = ():PurchaseHistoryHooks =>{
             )
             .then((res:AxiosResponse) => {
                 console.log(`success send history[${id}:${use_store_product_name}]`);
-                const newPurchaseHistories = purchaseHistories.map(purchaseHistory =>{
-                    if (purchaseHistory.id != newHistory.id){
-                      return purchaseHistory
-                    }else{
-                      return newHistory
-                    }
-                })
-                setPurchaseHistories(newPurchaseHistories)
             }).catch((error: AxiosError) =>  {
                 axiosErrorOutput(error,"post PurchaseHistory error")
+                setPurchaseHistories(oldPurchaseHistories)
             })
-        }else{
-            
         }
     }
     const deletePurchaseHistory = async (deletedHistory:PurchaseHistory) => {
-        const { jwtVerify } = awsJwtVerify();
-        const {idToken,verifyResult} =  await jwtVerify()
-
         const {id} = deletedHistory;
-        if (verifyResult && idToken != null){
+        const idToken = await getIdToken();
+        if (idToken != undefined){
             const headers = {
                 "Authorization": idToken
             }
@@ -145,8 +135,6 @@ export const usePurchaseHistoryHooks = ():PurchaseHistoryHooks =>{
             }).catch((error: AxiosError) => {
                 axiosErrorOutput(error,"post PurchaseHistories error")
             })
-        }else{
-
         }
     }
     return {
